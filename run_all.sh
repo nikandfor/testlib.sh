@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source $(dirname "$0")/lib.sh
+source $(dirname "$0")/testlib.sh
 
 test "$#" -gt 0 &&
         comment "Runing tests" ||

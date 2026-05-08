@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source $(dirname "$0")/lib.sh
+source $(dirname "$0")/testlib.sh
 
 header "testlib.sh Showcase"
 
