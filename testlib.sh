@@ -4,55 +4,46 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	exit 1
 fi
 
+bold="1"
+red="31"
+boldred="31;1"
+cyan="36"
+boldcyan="36;1"
+
 function echo2 {
 	echo >&2 "$@"
 }
 
-function color2 {
+function color {
+	if [[ $1 -ge 0 && ($1 -eq 0 || -t $1) ]]; then
+		echo -en "\e[${2}m"
+		cat
+		echo -en "\e[0m"
+	else
+		cat
+	fi
+}
+
+function comment {
 	{
-
-	test -t 2 && echo -en '\e['"$1"'m' || true
-	cat
-	test -t 2 && echo -en '\e[0m' || true
-
+	echo
+	echo "# $@" | color 2 $cyan
 	} >&2
 }
 
-function bold {
-	color2 1
-}
-
-function red {
-	color2 31
-}
-
-function boldred {
-	color2 '31;1'
-}
-
-function cyan {
-	color2 36
-}
-
-function boldcyan {
-	color2 '36;1'
-}
-
-
-function comment {
-	echo2
-	echo "# $@" | cyan
-}
-
 function comment_more {
-	echo "# $@" | cyan
+	{
+	echo "# $@" | color 2 $cyan
+	} >&2
 }
 
 function header {
-	echo2
-	echo2
-	echo "# $@" | boldcyan
-	echo2 ===================
+	{
+	echo
+	echo
+	echo "# $@" | color 2 $boldcyan
+	echo ===================
+	} >&2
 }
 
 _status=0
@@ -70,7 +61,7 @@ function fail {
 function FAIL {
 	_status=1
 
-	echo "${1:-FAILED}" | boldred
+	echo "${1:-FAILED}" | color 2 $boldred >&2
 
 	return 1
 }
@@ -83,7 +74,7 @@ function assertok {
 	stillok && return
 
 	if test -n "$1"; then
-		echo "$1" | boldred
+		echo "$1" | color 2 $boldred >&2
 	fi
 
 	exit $_status
@@ -101,10 +92,10 @@ function exit_code {
 	done
 
 	{
-		echo
-		stillok &&
-			echo ALL IS OK ||
-			echo TEST FAILED | boldred
+	echo
+	stillok &&
+		echo ALL IS OK ||
+		echo TEST FAILED | color 2 $boldred
 	} >&2
 
 	exit $_status
@@ -112,7 +103,7 @@ function exit_code {
 
 trap exit_code EXIT
 
-function printcmd {
+function quotecmd {
 	local index
 	local s=("${@}")
 
@@ -130,28 +121,33 @@ function printcmd {
 		fi
 	done
 
-	echo "${s[@]}"
+	echo -n "${s[@]}"
 }
 
-function jqorfail {
-	jq -c . .out || { cat .out; FAIL $1; }
-}
-
-function safejq {
-	jq -c . .out || cat .out
+function printcmd {
+	quotecmd "$@"
+	echo
 }
 
 function res {
 	cat .out
 }
 
+function prettysafe {
+	jq -c . .out || cat .out
+}
+
 function ifcond {
-	res | jq -e "$1" >/dev/null
+	jq -e "$@" .out >/dev/null
+}
+
+function iferr {
+	ifcond 'objects | has("error")'
 }
 
 # prints command and runs in
 function run {
-	printcmd "$@" | bold
+	printcmd "$@" | color 2 $bold >&2
 
 	"$@"
 }
@@ -161,46 +157,60 @@ function runcurl {
 	run curl -s "$@" >.out || FAIL "FAILED WITH CODE $?"
 }
 
-# checks the result and fails the test
-function check_and_fail {
+
+function failor {
 	if ifcond "$1"; then
-		jqorfail | red
+		prettysafe | color 1 $red
 		fail
+		true
 	else
-		jqorfail
+		false
 	fi
+}
+
+function postrun_or_prettysafe {
+	if [[ -v postrun ]]; then
+		res | "$postrun"
+	else
+		prettysafe
+	fi
+}
+
+# checks the result and fails the test
+function failif {
+	failor "$1" || postrun_or_prettysafe
 }
 
 # makes api call and checks the result
 function apicall {
 	runcurl "$@" &&
-	check_and_fail 'objects | has("error")'
+	failif 'objects | has("error")'
 }
 
 # makes api call and checks the result expecting an error
 function apicallerr {
 	runcurl "$@" &&
-	check_and_fail 'objects | has("error") | not'
+	failif 'objects | has("error") | not'
 }
 
 # makes api call, do not fail on error
 function apicallshould {
 	local code
 
-	runcurl "$@" && {
-		code=$?
-		safejq
-		return $code
-	}
-}
+	runcurl "$@"
+	code=$?
 
-function flatlist {
-	jq -c 'if type == "array" then .[] else . end'
+	postrun_or_prettysafe
+
+	return $code
 }
 
 # checks the condition and prints condition if it failed
 function check {
-	ifcond "$1" || FAIL "FAILED: $1"
+	if ! ifcond "$@"; then
+		while [[ $1 == -* ]]; do shift; done
+		FAIL "FAILED: $@"
+	fi
 }
 
 function waitfor {
@@ -212,4 +222,8 @@ function waitfor {
 
 		sleep 1s
 	done
+}
+
+function flatlist {
+	jq -c 'if type == "array" then .[] else . end'
 }
