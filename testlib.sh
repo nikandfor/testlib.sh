@@ -133,16 +133,70 @@ function res {
 	cat .out
 }
 
-function prettysafe {
+function jsonres {
 	jq -c . .out || cat .out
+}
+
+function code {
+	cat .code
+}
+
+function resheader {
+	cat .header
+}
+
+function resisempty {
+	test "$(res | wc -c)" -eq 0
+}
+
+function jsonresformat {
+	if [[ -v format ]]; then
+		jsonres | $format
+	else
+		jsonres
+	fi
 }
 
 function ifcond {
 	jq -e "$@" .out >/dev/null
 }
 
-function iferr {
-	ifcond 'objects | has("error")'
+function ifcode {
+	jq -e "$@" .code >/dev/null
+}
+
+function ifge400 {
+	ifcode '. >= 400'
+}
+function if4xx {
+	ifcode '. >= 400 and . < 500'
+}
+function if5xx {
+	ifcode '. >= 500'
+}
+
+function checkres {
+	if ifcond "$@"; then
+		jsonresformat
+	else
+		jsonresformat | color 1 $red
+		fail
+	fi
+}
+
+function checkboth {
+	local code0 code1 code2
+	code0=0
+
+	[[ -v precheck ]] && { "${precheck[@]}"; code0=$?; }
+
+	ifcode "$1"
+	code1=$?
+
+	checkres "$2"
+	code2=$?
+
+	[[ $code0 -eq 0 && $code1 -eq 0 && $code2 -eq 0 ]]
 }
 
 # prints command and runs in
@@ -154,55 +208,43 @@ function run {
 
 # makes an api call
 function runcurl {
-	run curl -s "$@" >.out || FAIL "FAILED WITH CODE $?"
-}
+	printcmd curl -s "$@" | color 2 $bold >&2
 
-
-function failor {
-	if ifcond "$1"; then
-		prettysafe | color 1 $red
-		fail
-		true
-	else
-		false
-	fi
-}
-
-function postrun_or_prettysafe {
-	if [[ -v postrun ]]; then
-		res | "$postrun"
-	else
-		prettysafe
-	fi
-}
-
-# checks the result and fails the test
-function failif {
-	failor "$1" || postrun_or_prettysafe
+	curl -s "$@" >.out -w '%output{.code}%{response_code}\n' -D .header ${curlflags[@]} || FAIL "FAILED WITH CODE $?"
 }
 
 # makes api call and checks the result
 function apicall {
 	runcurl "$@" &&
-	failif 'objects | has("error")'
+	checkboth '. >= 200 and . < 300' \
+		'(type == "object" and has("error")) | not'
+}
+
+function apicallnc {
+	runcurl "$@" &&
+	ifcode '. >= 200 and . < 300' &&
+	resisempty
 }
 
 # makes api call and checks the result expecting an error
 function apicallerr {
 	runcurl "$@" &&
-	failif 'objects | has("error") | not'
+	checkboth '. >= 400' \
+		'.'
+}
+
+function apicallerrnc {
+	runcurl "$@" &&
+	ifcode '. >= 400' &&
+	resisempty
 }
 
 # makes api call, do not fail on error
 function apicallshould {
 	local code
 
-	runcurl "$@"
-	code=$?
-
-	postrun_or_prettysafe
-
-	return $code
+	runcurl "$@" &&
+	checkboth . .
 }
 
 # checks the condition and prints condition if it failed
@@ -210,6 +252,13 @@ function check {
 	if ! ifcond "$@"; then
 		while [[ $1 == -* ]]; do shift; done
 		FAIL "FAILED: $@"
+	fi
+}
+
+function checkcode {
+	if ! ifcode "$@"; then
+		while [[ $1 == -* ]]; do shift; done
+		FAIL "FAILED code: $@"
 	fi
 }
 
