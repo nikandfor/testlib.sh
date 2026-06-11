@@ -110,7 +110,9 @@ function quotecmd {
 	for index in "${!s[@]}"; do
 		v="${s[index]}"
 
-		if [[ "${s[index]}" =~ [[:space:]\&\"\'\$\`] ]]; then
+		if [[ -z "$v" ]]; then
+			s[index]='""'
+		elif [[ "$v" =~ [[:space:]\&\"\'\$\`] ]]; then
 			if [[ ! "$v" =~ [\"] ]]; then
 				s[index]=\""$v"\"
 			elif [[ ! "$v" =~ [\'] ]]; then
@@ -137,12 +139,16 @@ function jsonres {
 	jq -c . .out || cat .out
 }
 
-function code {
+function rescode {
 	cat .code
 }
 
 function resheader {
 	cat .header
+}
+
+function resheader.json {
+	cat .header.json
 }
 
 function resisempty {
@@ -184,16 +190,37 @@ function checkres {
 	fi
 }
 
+function checkcode0 {
+	if ! ifcode "$@"; then
+		FAIL "status code: $(rescode)"
+	fi
+}
+
 function checkboth {
 	local code0 code1 code2
 	code0=0
 
 	[[ -v precheck ]] && { "${precheck[@]}"; code0=$?; }
 
-	ifcode "$1"
+	checkcode0 "$1"
 	code1=$?
 
 	checkres "$2"
+	code2=$?
+
+	[[ $code0 -eq 0 && $code1 -eq 0 && $code2 -eq 0 ]]
+}
+
+function checkbothnc {
+	local code0 code1 code2
+	code0=0
+
+	[[ -v precheck ]] && { "${precheck[@]}"; code0=$?; }
+
+	checkcode0 "$1"
+	code1=$?
+
+	resisempty || { res | color 1 $red; fail; }
 	code2=$?
 
 	[[ $code0 -eq 0 && $code1 -eq 0 && $code2 -eq 0 ]]
@@ -210,7 +237,7 @@ function run {
 function runcurl {
 	printcmd curl -s "$@" | color 2 $bold >&2
 
-	curl -s "$@" >.out -w '%output{.code}%{response_code}\n' -D .header ${curlflags[@]} || FAIL "FAILED WITH CODE $?"
+	curl -s "$@" >.out -w '%output{.code}%{response_code}\n%output{.header.json}%{header_json}\n' -D .header ${curlflags[@]} || FAIL "FAILED WITH CODE $?"
 }
 
 # makes api call and checks the result
@@ -222,8 +249,7 @@ function apicall {
 
 function apicallnc {
 	runcurl "$@" &&
-	ifcode '. >= 200 and . < 300' &&
-	resisempty
+	checkbothnc '. >= 200 and . < 300'
 }
 
 # makes api call and checks the result expecting an error
@@ -235,8 +261,7 @@ function apicallerr {
 
 function apicallerrnc {
 	runcurl "$@" &&
-	ifcode '. >= 400' &&
-	resisempty
+	checkbothnc '. >= 400'
 }
 
 # makes api call, do not fail on error
@@ -251,14 +276,22 @@ function apicallshould {
 function check {
 	if ! ifcond "$@"; then
 		while [[ $1 == -* ]]; do shift; done
-		FAIL "FAILED: $@"
+		FAIL "CHECK FAILED: $@"
 	fi
 }
 
 function checkcode {
 	if ! ifcode "$@"; then
 		while [[ $1 == -* ]]; do shift; done
-		FAIL "FAILED code: $@"
+		FAIL "CHECK FAILED (http code): $@ [$(rescode)]"
+	fi
+}
+
+function checknobody {
+	if resheader.json | jq -e '[(.["content-length"][]? | tonumber | . > 0), has("transfer-encoding")] | any' >/dev/null; then
+		echo "CHECK FAILED: body found" | color 2 $boldred
+		resheader | color 2 $red >&2
+		fail
 	fi
 }
 
