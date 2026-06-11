@@ -12,11 +12,11 @@ if ! declare -f run > /dev/null; then
     run() { "$@"; }
 fi
 
-function dl {
+dl() {
 	run curl -s "$baseurl/$1" -o "$outputdir/$1"
 }
 
-function dlcx {
+dlcx() {
 	dl "$1" && run chmod +x "$outputdir/$1"
 }
 

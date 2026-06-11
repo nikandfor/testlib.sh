@@ -10,11 +10,11 @@ boldred="31;1"
 cyan="36"
 boldcyan="36;1"
 
-function echo2 {
+echo2() {
 	echo >&2 "$@"
 }
 
-function color {
+color() {
 	if [[ $1 -ge 0 && ($1 -eq 0 || -t $1) ]]; then
 		echo -en "\e[${2}m"
 		cat
@@ -24,41 +24,41 @@ function color {
 	fi
 }
 
-function comment {
+comment() {
 	{
 	echo
-	echo "# $@" | color 2 $cyan
+	echo "# $*" | color 2 $cyan
 	} >&2
 }
 
-function comment_more {
+comment_more() {
 	{
-	echo "# $@" | color 2 $cyan
+	echo "# $*" | color 2 $cyan
 	} >&2
 }
 
-function header {
+header() {
 	{
 	echo
 	echo
-	echo "# $@" | color 2 $boldcyan
+	echo "# $*" | color 2 $boldcyan
 	echo ===================
 	} >&2
 }
 
 _status=0
 
-function failed {
+failed() {
 	test "$_status" -ne 0
 }
 
-function fail {
+fail() {
 	_status=1
 
 	return 1
 }
 
-function FAIL {
+FAIL() {
 	_status=1
 
 	echo "${1:-FAILED}" | color 2 $boldred >&2
@@ -66,11 +66,11 @@ function FAIL {
 	return 1
 }
 
-function stillok {
+stillok() {
 	test "$_status" -eq 0
 }
 
-function assertok {
+assertok() {
 	stillok && return
 
 	if test -n "$1"; then
@@ -81,14 +81,20 @@ function assertok {
 }
 
 traps=()
+trapn=()
 
-function defer {
+defer() {
 	traps+=("$@")
+	trapn+=($#)
 }
 
-function exit_code {
-	for cmd in "${traps[@]}"; do
-		run "$cmd"
+exit_code() {
+	local i n end=${#traps[@]}
+
+	for ((i=${#trapn[@]}-1; i>=0; i--)); do
+		n=${trapn[i]}
+		run "${traps[@]:end-n:n}"
+		end=$((end-n))
 	done
 
 	{
@@ -103,7 +109,7 @@ function exit_code {
 
 trap exit_code EXIT
 
-function quotecmd {
+quotecmd() {
 	local index
 	local s=("${@}")
 
@@ -126,62 +132,62 @@ function quotecmd {
 	echo -n "${s[@]}"
 }
 
-function printcmd {
+printcmd() {
 	quotecmd "$@"
 	echo
 }
 
-function res {
+res() {
 	cat .out
 }
 
-function jsonres {
+jsonres() {
 	jq -c . .out || cat .out
 }
 
-function rescode {
+rescode() {
 	cat .code
 }
 
-function resheader {
+resheader() {
 	cat .header
 }
 
-function resheader.json {
+resheaderjson() {
 	cat .header.json
 }
 
-function resisempty {
+resisempty() {
 	test "$(res | wc -c)" -eq 0
 }
 
-function jsonresformat {
+jsonresformat() {
 	if [[ -v format ]]; then
-		jsonres | $format
+		jsonres | "${format[@]}"
 	else
 		jsonres
 	fi
 }
 
-function ifcond {
+ifcond() {
 	jq -e "$@" .out >/dev/null
 }
 
-function ifcode {
+ifcode() {
 	jq -e "$@" .code >/dev/null
 }
 
-function ifge400 {
+ifge400() {
 	ifcode '. >= 400'
 }
-function if4xx {
+if4xx() {
 	ifcode '. >= 400 and . < 500'
 }
-function if5xx {
+if5xx() {
 	ifcode '. >= 500'
 }
 
-function checkres {
+checkres() {
 	if ifcond "$@"; then
 		jsonresformat
 	else
@@ -190,13 +196,13 @@ function checkres {
 	fi
 }
 
-function checkcode0 {
+checkcode0() {
 	if ! ifcode "$@"; then
 		FAIL "status code: $(rescode)"
 	fi
 }
 
-function checkboth {
+checkboth() {
 	local code0 code1 code2
 	code0=0
 
@@ -211,7 +217,7 @@ function checkboth {
 	[[ $code0 -eq 0 && $code1 -eq 0 && $code2 -eq 0 ]]
 }
 
-function checkbothnc {
+checkbothnc() {
 	local code0 code1 code2
 	code0=0
 
@@ -227,45 +233,45 @@ function checkbothnc {
 }
 
 # prints command and runs in
-function run {
+run() {
 	printcmd "$@" | color 2 $bold >&2
 
 	"$@"
 }
 
 # makes an api call
-function runcurl {
+runcurl() {
 	printcmd curl -s "$@" | color 2 $bold >&2
 
-	curl -s "$@" >.out -w '%output{.code}%{response_code}\n%output{.header.json}%{header_json}\n' -D .header ${curlflags[@]} || FAIL "FAILED WITH CODE $?"
+	curl -s "$@" >.out -w '%output{.code}%{response_code}\n%output{.header.json}%{header_json}\n' -D .header "${curlflags[@]}" || FAIL "FAILED WITH CODE $?"
 }
 
 # makes api call and checks the result
-function apicall {
+apicall() {
 	runcurl "$@" &&
 	checkboth '. >= 200 and . < 300' \
 		'(type == "object" and has("error")) | not'
 }
 
-function apicallnc {
+apicallnc() {
 	runcurl "$@" &&
 	checkbothnc '. >= 200 and . < 300'
 }
 
 # makes api call and checks the result expecting an error
-function apicallerr {
+apicallerr() {
 	runcurl "$@" &&
 	checkboth '. >= 400' \
 		'.'
 }
 
-function apicallerrnc {
+apicallerrnc() {
 	runcurl "$@" &&
 	checkbothnc '. >= 400'
 }
 
 # makes api call, do not fail on error
-function apicallshould {
+apicallshould() {
 	local code
 
 	runcurl "$@" &&
@@ -273,29 +279,29 @@ function apicallshould {
 }
 
 # checks the condition and prints condition if it failed
-function check {
+check() {
 	if ! ifcond "$@"; then
 		while [[ $1 == -* ]]; do shift; done
-		FAIL "CHECK FAILED: $@"
+		FAIL "CHECK FAILED: $*"
 	fi
 }
 
-function checkcode {
+checkcode() {
 	if ! ifcode "$@"; then
 		while [[ $1 == -* ]]; do shift; done
-		FAIL "CHECK FAILED (http code): $@ [$(rescode)]"
+		FAIL "CHECK FAILED (http code): $* [$(rescode)]"
 	fi
 }
 
-function checknobody {
-	if resheader.json | jq -e '[(.["content-length"][]? | tonumber | . > 0), has("transfer-encoding")] | any' >/dev/null; then
+checknobody() {
+	if resheaderjson | jq -e '[(.["content-length"][]? | tonumber | . > 0), has("transfer-encoding")] | any' >/dev/null; then
 		echo "CHECK FAILED: body found" | color 2 $boldred
 		resheader | color 2 $red >&2
 		fail
 	fi
 }
 
-function waitfor {
+waitfor() {
 	seconds="${seconds:-15}"
 	local i
 
@@ -306,6 +312,6 @@ function waitfor {
 	done
 }
 
-function flatlist {
+flatlist() {
 	jq -c 'if type == "array" then .[] else . end'
 }
